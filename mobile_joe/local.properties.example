@@ -1,0 +1,3 @@
+## Copy this file to `local.properties` only if Android Studio does not create it automatically.
+## Replace the path below with your local Android SDK path on Windows.
+sdk.dir=C\:\\Users\\FADEL\\AppData\\Local\\Android\\Sdk

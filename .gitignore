@@ -1,0 +1,39 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Desktop build output
+desktop_joe/build/
+desktop_joe/dist/
+desktop_joe/__pycache__/
+desktop_joe/portable_release/
+desktop_joe/*.spec.bak
+desktop_joe/*.db
+
+# Android / Gradle
+mobile_joe/.gradle/
+mobile_joe/local.properties
+mobile_joe/app/build/
+mobile_joe/build/
+*.apk
+*.aab
+
+# Release packages
+release_online/
+release_online.zip
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS files
+Thumbs.db
+Desktop.ini
