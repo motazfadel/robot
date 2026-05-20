@@ -3,7 +3,7 @@
 sdk.dir=C\:\\Users\\FADEL\\AppData\\Local\\Android\\Sdk
 
 ## Optional: override the mobile API base URL used by BuildConfig.
-## Current production-like default is https://robot.lareenmedco.com/api
+## Current production-like default is https://robot.lareenmedco.com
 ## Emulator local testing example: http://10.0.2.2/robote/api
 ## Real device local testing example: http://192.168.1.50/robote/api
-JOE_API_BASE_URL=https://robot.lareenmedco.com/api
+JOE_API_BASE_URL=https://robot.lareenmedco.com
