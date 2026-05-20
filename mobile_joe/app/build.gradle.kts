@@ -17,15 +17,15 @@ android {
         }
     }
     val joeApiBaseUrl = providers.gradleProperty("JOE_API_BASE_URL")
-        .orElse(localProperties.getProperty("JOE_API_BASE_URL") ?: "http://10.0.2.2/robote/api")
+        .orElse(localProperties.getProperty("JOE_API_BASE_URL") ?: "https://robot.lareenmedco.com/api")
         .get()
 
     defaultConfig {
         applicationId = "com.robote.joe.mobile"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.2.1"
         buildConfigField("String", "JOE_API_BASE_URL", "\"$joeApiBaseUrl\"")
     }
 
