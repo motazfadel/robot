@@ -217,7 +217,7 @@ class JoeRemoteBrain(
 ) {
     suspend fun handle(text: String, snapshot: HomeSnapshot): JoeRemoteResult {
         return withContext(Dispatchers.IO) {
-            val endpoint = "${baseUrl.trimEnd('/')}/joe/interpret.php"
+            val endpoint = "${baseUrl.trimEnd('/')}/interpret.php"
             val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 20_000
