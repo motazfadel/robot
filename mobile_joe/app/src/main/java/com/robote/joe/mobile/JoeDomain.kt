@@ -136,7 +136,7 @@ class JoeSmartAssistant(
 ) {
     suspend fun handle(text: String, snapshot: HomeSnapshot): JoeExecutionResult {
         return when (val remote = remoteBrain.handle(text, snapshot)) {
-            is JoeRemoteResult.Success -> executeRemotePayload(remote)
+            is JoeRemoteResult.Success -> executeRemotePayload(remote, snapshot)
             is JoeRemoteResult.Failure -> {
                 val local = localBrain.handle(text, snapshot)
                 JoeExecutionResult(
@@ -148,7 +148,10 @@ class JoeSmartAssistant(
         }
     }
 
-    private suspend fun executeRemotePayload(result: JoeRemoteResult.Success): JoeExecutionResult {
+    private suspend fun executeRemotePayload(
+        result: JoeRemoteResult.Success,
+        snapshot: HomeSnapshot
+    ): JoeExecutionResult {
         val payload = result.payload
         val reply = when (payload.intent) {
             "add_debt" -> {
