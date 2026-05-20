@@ -37,6 +37,7 @@ import androidx.compose.material3.Divider
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -58,6 +59,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.time.LocalDate
 import java.util.Locale
 
 class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
@@ -125,11 +127,13 @@ private fun JoeApp(
 ) {
     val snapshot by viewModel.snapshot.collectAsStateWithLifecycle()
     val conversation by viewModel.conversation.collectAsStateWithLifecycle()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     MaterialTheme {
         JoeHomeScreen(
             snapshot = snapshot,
             conversation = conversation,
+            uiState = uiState,
             onSendMessage = { text -> viewModel.handleUserMessage(text) },
             onStartVoice = onStartVoice
         )
@@ -141,6 +145,7 @@ private fun JoeApp(
 private fun JoeHomeScreen(
     snapshot: HomeSnapshot,
     conversation: List<ConversationMessage>,
+    uiState: JoeUiState,
     onSendMessage: (String) -> Unit,
     onStartVoice: () -> Unit
 ) {
@@ -151,7 +156,8 @@ private fun JoeHomeScreen(
             "ملخص اليوم",
             "سجل دين على أبو رامي 300 دولار بعد شهر",
             "أضف سكر إلى المشتريات",
-            "سجل تذكير زيارة الطبيب غدا"
+            "سجل تذكير زيارة الطبيب غدا",
+            "هل عندي ديون متأخرة؟"
         )
     }
 
@@ -161,7 +167,7 @@ private fun JoeHomeScreen(
                 title = {
                     Column {
                         Text("جو", fontWeight = FontWeight.Bold)
-                        Text("رفيق علاء اليومي", style = MaterialTheme.typography.labelMedium)
+                        Text("مساعد إداري ذكي عبر OpenAI", style = MaterialTheme.typography.labelMedium)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -178,7 +184,11 @@ private fun JoeHomeScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item {
-                HeroSection(snapshot = snapshot, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+                HeroSection(
+                    snapshot = snapshot,
+                    uiState = uiState,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                )
             }
 
             item {
@@ -186,15 +196,21 @@ private fun JoeHomeScreen(
             }
 
             item {
-                QuickActionRow(actions = quickActions, onPick = {
-                    input = it
-                    onSendMessage(it)
-                }, modifier = Modifier.padding(horizontal = 16.dp))
+                QuickActionRow(
+                    actions = quickActions,
+                    onPick = {
+                        input = it
+                        onSendMessage(it)
+                        input = ""
+                    },
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
             }
 
             item {
                 CommandComposer(
                     value = input,
+                    isBusy = uiState.isBusy,
                     onValueChange = { input = it },
                     onSend = {
                         val message = input.trim()
@@ -234,6 +250,7 @@ private fun JoeHomeScreen(
 @Composable
 private fun HeroSection(
     snapshot: HomeSnapshot,
+    uiState: JoeUiState,
     modifier: Modifier = Modifier
 ) {
     ElevatedCard(
@@ -262,6 +279,19 @@ private fun HeroSection(
                     style = MaterialTheme.typography.bodyLarge,
                     color = Color.White.copy(alpha = 0.92f)
                 )
+                Text(
+                    text = uiState.aiStatus,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold
+                )
+                if (uiState.isBusy) {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = Color.White,
+                        trackColor = Color.White.copy(alpha = 0.28f)
+                    )
+                }
             }
         }
     }
@@ -326,6 +356,7 @@ private fun QuickActionRow(
 @Composable
 private fun CommandComposer(
     value: String,
+    isBusy: Boolean,
     onValueChange: (String) -> Unit,
     onSend: () -> Unit,
     onStartVoice: () -> Unit,
@@ -344,15 +375,16 @@ private fun CommandComposer(
                 onValueChange = onValueChange,
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 2,
+                enabled = !isBusy,
                 label = { Text("مثال: سجل دين على أبو رامي 300 دولار بعد شهر") }
             )
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                Button(onClick = onSend, modifier = Modifier.weight(1f)) {
+                Button(onClick = onSend, modifier = Modifier.weight(1f), enabled = !isBusy) {
                     Icon(Icons.Outlined.Send, contentDescription = null)
                     Box(modifier = Modifier.width(8.dp))
-                    Text("تنفيذ")
+                    Text(if (isBusy) "جارٍ التنفيذ" else "تنفيذ")
                 }
-                Button(onClick = onStartVoice, modifier = Modifier.weight(1f)) {
+                Button(onClick = onStartVoice, modifier = Modifier.weight(1f), enabled = !isBusy) {
                     Icon(Icons.Outlined.Mic, contentDescription = null)
                     Box(modifier = Modifier.width(8.dp))
                     Text("صوت")
@@ -372,20 +404,20 @@ private fun TodayBoard(
             title = "الديون ذات الأولوية",
             rows = snapshot.debts
                 .filterNot { it.isPaid }
-                .sortedWith(compareBy<DebtEntity> { !it.dueDate.isBefore(java.time.LocalDate.now()) }.thenBy { it.dueDate })
+                .sortedWith(compareBy<DebtEntity> { !it.dueDate.isBefore(LocalDate.now()) }.thenBy { it.dueDate })
                 .take(3)
                 .map {
-                    val badge = if (it.dueDate.isBefore(java.time.LocalDate.now())) "متأخر" else if (it.dueDate == java.time.LocalDate.now()) "اليوم" else "لاحقًا"
-                    "${it.personName} • ${formatAmount(it.amount)} ${it.currency} • $badge"
+                    val badge = if (it.dueDate.isBefore(LocalDate.now())) "متأخر" else if (it.dueDate == LocalDate.now()) "اليوم" else "لاحقًا"
+                    "${it.personName} - ${formatAmount(it.amount)} ${it.currency} - $badge"
                 }
         )
         InsightSection(
             title = "تذكيرات اليوم",
-            rows = snapshot.reminders.take(3).map { "${it.title} • ${it.dueDate.formatArabic()}" }
+            rows = snapshot.reminders.take(3).map { "${it.title} - ${it.dueDate.formatArabic()}" }
         )
         InsightSection(
             title = "مشتريات البيت",
-            rows = snapshot.shopping.take(5).map { "${it.itemName} • أضافه ${it.addedBy.ifBlank { "البيت" }}" }
+            rows = snapshot.shopping.take(5).map { "${it.itemName} - أضافه ${it.addedBy.ifBlank { "البيت" }}" }
         )
     }
 }

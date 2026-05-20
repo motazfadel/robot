@@ -1,3 +1,8 @@
 ## Copy this file to `local.properties` only if Android Studio does not create it automatically.
 ## Replace the path below with your local Android SDK path on Windows.
 sdk.dir=C\:\\Users\\FADEL\\AppData\\Local\\Android\\Sdk
+
+## Optional: override the mobile API base URL used by BuildConfig.
+## Emulator default is http://10.0.2.2/robote/api
+## Real device example: http://192.168.1.50/robote/api
+JOE_API_BASE_URL=http://10.0.2.2/robote/api

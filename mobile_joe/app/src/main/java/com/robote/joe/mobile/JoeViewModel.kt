@@ -17,21 +17,34 @@ data class ConversationMessage(
     val text: String
 )
 
+data class JoeUiState(
+    val isBusy: Boolean = false,
+    val aiStatus: String = "OpenAI جاهز",
+    val lastSource: String = "startup"
+)
+
 class JoeViewModel(
     application: Application
 ) : AndroidViewModel(application) {
     private val repository = JoeRepository(JoeDatabase.get(application).dao())
-    private val brain = JoeLocalBrain(repository)
+    private val assistant = JoeSmartAssistant(
+        repository = repository,
+        remoteBrain = JoeRemoteBrain(BuildConfig.JOE_API_BASE_URL),
+        localBrain = JoeLocalBrain(repository)
+    )
 
     val snapshot: StateFlow<HomeSnapshot> = repository.observeSnapshot()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeSnapshot())
 
     private val _conversation = MutableStateFlow(
         listOf(
-            ConversationMessage("جو", "أنا جاهز يا سيدي. اطلب ملخص اليوم أو سجّل دينًا أو تذكيرًا أو فاتورة أو مشتريات.")
+            ConversationMessage("جو", "أنا جاهز يا سيدي. أرسل أمرًا طبيعيًا وسأحاول فهمه عبر OpenAI ثم أنفذه داخل التطبيق.")
         )
     )
     val conversation = _conversation.asStateFlow()
+
+    private val _uiState = MutableStateFlow(JoeUiState())
+    val uiState = _uiState.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -43,8 +56,17 @@ class JoeViewModel(
         if (text.isBlank()) return
         viewModelScope.launch {
             val userText = text.trim()
-            val result = brain.handle(userText, snapshot.value)
-            _conversation.value = _conversation.value + ConversationMessage("علاء", userText) + ConversationMessage("جو", result.reply)
+            _uiState.value = _uiState.value.copy(isBusy = true, aiStatus = "جارٍ التفكير...")
+            _conversation.value = _conversation.value + ConversationMessage("علاء", userText)
+
+            val result = assistant.handle(userText, snapshot.value)
+
+            _conversation.value = _conversation.value + ConversationMessage("جو", result.reply)
+            _uiState.value = JoeUiState(
+                isBusy = false,
+                aiStatus = result.modeLabel,
+                lastSource = result.source
+            )
             onReplyReady(result.reply)
         }
     }

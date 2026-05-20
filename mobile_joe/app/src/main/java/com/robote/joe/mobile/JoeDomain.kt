@@ -1,7 +1,16 @@
 package com.robote.joe.mobile
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -82,8 +91,225 @@ class JoeRepository(
     }
 }
 
+data class JoeExecutionResult(
+    val reply: String,
+    val source: String,
+    val modeLabel: String
+)
+
+data class JoeIntentPayload(
+    val intent: String,
+    val personName: String = "",
+    val vendorName: String = "",
+    val title: String = "",
+    val itemName: String = "",
+    val amount: Double = 0.0,
+    val currency: String = "USD",
+    val dueDate: LocalDate? = null,
+    val billDate: LocalDate? = null,
+    val category: String = "",
+    val notes: String = ""
+)
+
+sealed class JoeRemoteResult {
+    data class Success(
+        val payload: JoeIntentPayload,
+        val reply: String,
+        val provider: String,
+        val modeLabel: String
+    ) : JoeRemoteResult()
+
+    data class Failure(
+        val message: String,
+        val modeLabel: String
+    ) : JoeRemoteResult()
+}
+
 sealed class JoeCommandResult(val reply: String) {
     class Inform(reply: String) : JoeCommandResult(reply)
+}
+
+class JoeSmartAssistant(
+    private val repository: JoeRepository,
+    private val remoteBrain: JoeRemoteBrain,
+    private val localBrain: JoeLocalBrain
+) {
+    suspend fun handle(text: String, snapshot: HomeSnapshot): JoeExecutionResult {
+        return when (val remote = remoteBrain.handle(text, snapshot)) {
+            is JoeRemoteResult.Success -> executeRemotePayload(remote)
+            is JoeRemoteResult.Failure -> {
+                val local = localBrain.handle(text, snapshot)
+                JoeExecutionResult(
+                    reply = "${local.reply}\n\nملاحظة: تعذر الوصول إلى الذكاء السحابي، لذلك استخدمت الفهم المحلي. ${remote.message}",
+                    source = "local",
+                    modeLabel = remote.modeLabel
+                )
+            }
+        }
+    }
+
+    private suspend fun executeRemotePayload(result: JoeRemoteResult.Success): JoeExecutionResult {
+        val payload = result.payload
+        val reply = when (payload.intent) {
+            "add_debt" -> {
+                if (payload.personName.isBlank() || payload.amount <= 0.0) {
+                    "فهمت أنك تريد تسجيل دين، لكنني أحتاج الاسم والمبلغ بشكل أوضح."
+                } else {
+                    val dueDate = payload.dueDate ?: LocalDate.now()
+                    repository.addDebt(payload.personName, payload.amount, payload.currency, dueDate, payload.notes)
+                    result.reply.ifBlank {
+                        "تم تسجيل دين على ${payload.personName} بقيمة ${formatAmount(payload.amount)} ${payload.currency} وتاريخ استحقاق ${dueDate.formatArabic()}."
+                    }
+                }
+            }
+
+            "add_reminder" -> {
+                if (payload.title.isBlank()) {
+                    "أحتاج نص التذكير بشكل أوضح حتى أحفظه."
+                } else {
+                    val dueDate = payload.dueDate ?: LocalDate.now()
+                    repository.addReminder(payload.title, dueDate, payload.notes)
+                    result.reply.ifBlank {
+                        "تم تسجيل التذكير ${payload.title} بتاريخ ${dueDate.formatArabic()}."
+                    }
+                }
+            }
+
+            "add_shopping_item" -> {
+                if (payload.itemName.isBlank()) {
+                    "فهمت أنك تريد إضافة عنصر للمشتريات، لكن اسم العنصر غير واضح."
+                } else {
+                    repository.addShopping(payload.itemName, "علاء")
+                    result.reply.ifBlank { "تمت إضافة ${payload.itemName} إلى قائمة المشتريات." }
+                }
+            }
+
+            "add_bill" -> {
+                if (payload.vendorName.isBlank() || payload.amount <= 0.0) {
+                    "أستطيع حفظ الفاتورة إذا كتبت اسم البائع والمبلغ والفئة بشكل أوضح."
+                } else {
+                    val billDate = payload.billDate ?: LocalDate.now()
+                    repository.addBill(payload.vendorName, payload.amount, payload.currency, billDate, payload.category.ifBlank { "غير مصنف" })
+                    result.reply.ifBlank {
+                        "تم حفظ فاتورة ${payload.vendorName} بقيمة ${formatAmount(payload.amount)} ${payload.currency} تحت فئة ${payload.category.ifBlank { "غير مصنف" }}."
+                    }
+                }
+            }
+
+            "today_summary" -> result.reply.ifBlank { localBrain.buildTodayReply(snapshot) }
+            "general_answer" -> result.reply.ifBlank { "أنا جاهز لمساعدتك." }
+            else -> result.reply.ifBlank { "سمعتك يا سيدي، لكنني أحتاج صياغة أوضح قليلًا." }
+        }
+
+        return JoeExecutionResult(
+            reply = reply,
+            source = result.provider,
+            modeLabel = result.modeLabel
+        )
+    }
+}
+
+class JoeRemoteBrain(
+    private val baseUrl: String
+) {
+    suspend fun handle(text: String, snapshot: HomeSnapshot): JoeRemoteResult {
+        return withContext(Dispatchers.IO) {
+            val endpoint = "${baseUrl.trimEnd('/')}/joe/interpret.php"
+            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 20_000
+                readTimeout = 40_000
+                doInput = true
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                setRequestProperty("Accept", "application/json")
+            }
+
+            try {
+                val payload = buildPayload(text, snapshot)
+                OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { writer ->
+                    writer.write(payload.toString())
+                }
+
+                val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
+                val body = stream?.use { input ->
+                    BufferedReader(InputStreamReader(input, Charsets.UTF_8)).readText()
+                }.orEmpty()
+
+                if (connection.responseCode !in 200..299) {
+                    val details = body.ifBlank { "HTTP ${connection.responseCode}" }
+                    return@withContext JoeRemoteResult.Failure(
+                        message = "الخادم أعاد خطأ: $details",
+                        modeLabel = "تعذر الاتصال بالسحابة"
+                    )
+                }
+
+                val json = JSONObject(body)
+                if (!json.optBoolean("ok", false)) {
+                    return@withContext JoeRemoteResult.Failure(
+                        message = json.optString("error", "فشل تفسير الطلب عبر OpenAI."),
+                        modeLabel = "OpenAI غير متاح"
+                    )
+                }
+
+                val command = json.optJSONObject("command") ?: JSONObject()
+                JoeRemoteResult.Success(
+                    payload = JoeIntentPayload(
+                        intent = command.optString("intent", "unknown"),
+                        personName = command.optString("person_name"),
+                        vendorName = command.optString("vendor_name"),
+                        title = command.optString("title"),
+                        itemName = command.optString("item_name"),
+                        amount = command.optDouble("amount", 0.0),
+                        currency = command.optString("currency", "USD"),
+                        dueDate = command.optString("due_date").toLocalDateOrNull(),
+                        billDate = command.optString("bill_date").toLocalDateOrNull(),
+                        category = command.optString("category"),
+                        notes = command.optString("notes")
+                    ),
+                    reply = json.optString("reply"),
+                    provider = json.optString("provider", "openai"),
+                    modeLabel = json.optString("mode_label", "OpenAI متصل")
+                )
+            } catch (_: Exception) {
+                JoeRemoteResult.Failure(
+                    message = "تعذر الاتصال بخدمة OpenAI. تأكد من تشغيل XAMPP وضبط المفتاح والرابط.",
+                    modeLabel = "وضع محلي احتياطي"
+                )
+            } finally {
+                connection.disconnect()
+            }
+        }
+    }
+
+    private fun buildPayload(text: String, snapshot: HomeSnapshot): JSONObject {
+        return JSONObject().apply {
+            put("message", text)
+            put("snapshot", JSONObject().apply {
+                put("today_reminders", snapshot.todayReminders)
+                put("due_today_debts", snapshot.dueTodayDebts)
+                put("overdue_debts", snapshot.overdueDebts)
+                put("open_bills", snapshot.openBills)
+                put("shopping_items", snapshot.shoppingItems)
+                put("total_open_debt_amount", snapshot.totalOpenDebtAmount)
+                put("debts", JSONArray(snapshot.debts.take(5).map {
+                    JSONObject().apply {
+                        put("person_name", it.personName)
+                        put("amount", it.amount)
+                        put("currency", it.currency)
+                        put("due_date", it.dueDate.toString())
+                    }
+                }))
+                put("shopping", JSONArray(snapshot.shopping.take(8).map { it.itemName }))
+                put("reminders", JSONArray(snapshot.reminders.take(5).map {
+                    JSONObject().apply {
+                        put("title", it.title)
+                        put("due_date", it.dueDate.toString())
+                    }
+                }))
+            })
+        }
+    }
 }
 
 class JoeLocalBrain(
@@ -136,7 +362,7 @@ class JoeLocalBrain(
                 } ?: JoeCommandResult.Inform("أستطيع حفظ الفاتورة إذا كتبت اسم البائع والمبلغ والفئة بشكل أوضح.")
             }
 
-            normalized.contains("وضغ الضيوف") || normalized.contains("وضع الضيوف") || normalized.contains("الخصوصيه") || normalized.contains("الخصوصية") -> {
+            normalized.contains("وضع الضيوف") || normalized.contains("الخصوصيه") || normalized.contains("الخصوصية") -> {
                 JoeCommandResult.Inform("تم فهم وضع الخصوصية. في النسخة القادمة سأحوّله إلى وضع صامت فعلي مع كلمة سر بديلة.")
             }
 
@@ -150,7 +376,7 @@ class JoeLocalBrain(
         }
     }
 
-    private fun buildTodayReply(snapshot: HomeSnapshot): String {
+    fun buildTodayReply(snapshot: HomeSnapshot): String {
         val today = LocalDate.now()
         val dueToday = snapshot.debts.filter { !it.isPaid && it.dueDate == today }
         val overdue = snapshot.debts.filter { !it.isPaid && it.dueDate.isBefore(today) }
@@ -274,3 +500,8 @@ fun extractRelativeDate(text: String): LocalDate {
 fun LocalDate.formatArabic(): String = format(DateTimeFormatter.ofPattern("d MMMM yyyy", Locale("ar")))
 
 fun formatAmount(value: Double): String = if (value % 1.0 == 0.0) value.toInt().toString() else "%.2f".format(value)
+
+private fun String?.toLocalDateOrNull(): LocalDate? {
+    if (this.isNullOrBlank()) return null
+    return runCatching { LocalDate.parse(this) }.getOrNull()
+}

@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -8,12 +10,23 @@ android {
     namespace = "com.robote.joe.mobile"
     compileSdk = 34
 
+    val localProperties = Properties().apply {
+        val file = rootProject.file("local.properties")
+        if (file.exists()) {
+            file.inputStream().use(::load)
+        }
+    }
+    val joeApiBaseUrl = providers.gradleProperty("JOE_API_BASE_URL")
+        .orElse(localProperties.getProperty("JOE_API_BASE_URL") ?: "http://10.0.2.2/robote/api")
+        .get()
+
     defaultConfig {
         applicationId = "com.robote.joe.mobile"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
+        buildConfigField("String", "JOE_API_BASE_URL", "\"$joeApiBaseUrl\"")
     }
 
     buildTypes {
@@ -36,6 +49,7 @@ android {
     }
 
     buildFeatures {
+        buildConfig = true
         compose = true
     }
 
